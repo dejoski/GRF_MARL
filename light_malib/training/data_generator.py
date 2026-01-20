@@ -29,11 +29,11 @@ def simple_data_generator(data, num_mini_batch, device, shuffle=True):
     for k in data:
         try:
             global_timer.record("data_copy_start")
-            if isinstance(data[k], np.ndarray):
-                batch[k] = torch.from_numpy(data[k]).to(device)
-            else:
-                batch[k] = data[k]
-            global_timer.time("data_copy_start", "data_copy_end", "data_copy")
+            # if isinstance(data[k], np.ndarray):
+            #     batch[k] = torch.from_numpy(data[k]).to(device)
+            # else:
+            batch[k] = data[k]
+            # global_timer.time("data_copy_start", "data_copy_end", "data_copy")
             batch[k] = batch[k].reshape(batch_size, *data[k].shape[2:])
         except Exception:
             Logger.error("k: {}".format(k))
@@ -69,6 +69,10 @@ def simple_data_generator(data, num_mini_batch, device, shuffle=True):
             # -> batch_size*n_agent,...
             tmp_batch[k] = batch[k][indices]
             tmp_batch[k] = tmp_batch[k].reshape(-1, *tmp_batch[k].shape[2:])
+            if isinstance(tmp_batch[k], np.ndarray):
+                 tmp_batch[k] = torch.from_numpy(tmp_batch[k]).to(device)
+            elif isinstance(tmp_batch[k], torch.Tensor):
+                 tmp_batch[k] = tmp_batch[k].to(device)
         yield {k: v for k, v in tmp_batch.items()}
 
 def simple_team_data_generator(data, num_mini_batch, device, shuffle=False):
@@ -172,7 +176,7 @@ def dummy_data_generator(data, num_mini_batch, device, shuffle=False):
 
 
 def recurrent_generator(data, num_mini_batch, rnn_data_chunk_length, device):
-    raise NotImplementedError("jh: whoever wants to use this function needs to double check this implementation first.")
+    # raise NotImplementedError("jh: whoever wants to use this function needs to double check this implementation first.")
     
     batch = {k: d for k, d in data.items()}
     # batch_size,seq_length,n_agent(,n_feats*)
@@ -198,19 +202,29 @@ def recurrent_generator(data, num_mini_batch, rnn_data_chunk_length, device):
         return x
 
     for k in batch:
-        if isinstance(batch[k], np.ndarray):
-            batch[k] = torch.from_numpy(batch[k]).to(device)
+        # if isinstance(batch[k], np.ndarray):
+        #     batch[k] = torch.from_numpy(batch[k]).to(device)
         batch[k] = _cast(batch[k])
 
     # jh: special optimization
     if num_mini_batch == 1:
+        tmp_batch = {}
         for k in batch:
-            if k not in ["rnn_state_0", "rnn_state_1"]:
-                batch[k] = torch.transpose(batch[k], 0, 1)
-                batch[k] = batch[k].reshape(-1, *batch[k].shape[3:])
+            if k not in ["rnn_state_0", "rnn_state_1", EpisodeKey.ACTOR_RNN_STATE, EpisodeKey.CRITIC_RNN_STATE]: # Updated keys
+                tmp_batch[k] = np.transpose(batch[k], (1, 0, *range(2, batch[k].ndim))) # Transpose numpy/tensor
+                tmp_batch[k] = tmp_batch[k].reshape(-1, *tmp_batch[k].shape[3:])
+                # Move to gpu
+                if isinstance(tmp_batch[k], np.ndarray):
+                     tmp_batch[k] = torch.from_numpy(tmp_batch[k]).to(device)
+                else:
+                     tmp_batch[k] = tmp_batch[k].to(device)
             else:
-                batch[k] = batch[k][:, 0, ...]
-                batch[k] = batch[k].reshape(-1, *batch[k].shape[2:])
+                tmp_batch[k] = batch[k][:, 0, ...]
+                tmp_batch[k] = tmp_batch[k].reshape(-1, *tmp_batch[k].shape[2:])
+                if isinstance(tmp_batch[k], np.ndarray):
+                     tmp_batch[k] = torch.from_numpy(tmp_batch[k]).to(device)
+                else:
+                     tmp_batch[k] = tmp_batch[k].to(device)
         yield {k: v for k, v in tmp_batch.items()}
         return
 
@@ -222,18 +236,30 @@ def recurrent_generator(data, num_mini_batch, rnn_data_chunk_length, device):
     for indices in sampler:
         tmp_batch = {}
         for k in batch:
-            if k not in ["rnn_state_0", "rnn_state_1"]:
+            if k not in ["rnn_state_0", "rnn_state_1", EpisodeKey.ACTOR_RNN_STATE, EpisodeKey.CRITIC_RNN_STATE]:
                 # batch_size,rnn_data_chunk_length,n_agent,(,n_feats*)
                 tmp_batch[k] = batch[k][indices]
                 # rnn_data_chunk_length,batch_size,n_agent,(,n_feats*)
-                tmp_batch[k] = torch.transpose(tmp_batch[k], 0, 1)
+                if isinstance(tmp_batch[k], np.ndarray):
+                    tmp_batch[k] = np.transpose(tmp_batch[k], (1, 0, *range(2, tmp_batch[k].ndim)))
+                else:
+                    tmp_batch[k] = torch.transpose(tmp_batch[k], 0, 1)
+                
                 # rnn_data_chunk_length*batch_size*n_agent,(,n_feats*)
                 tmp_batch[k] = tmp_batch[k].reshape(-1, *tmp_batch[k].shape[3:])
+                if isinstance(tmp_batch[k], np.ndarray):
+                    tmp_batch[k] = torch.from_numpy(tmp_batch[k]).to(device)
+                else:
+                    tmp_batch[k] = tmp_batch[k].to(device)
             else:
                 # batch_size,rnn_data_chunk_length,n_agent,(,n_feats*)
                 # -> batch_size,n_agent,(,n_feats*) only get the first hidden
                 tmp_batch[k] = batch[k][indices][:, 0, ...]
                 # batch_size*n_agent,(,n_feats*)
                 tmp_batch[k] = tmp_batch[k].reshape(-1, *tmp_batch[k].shape[2:])
+                if isinstance(tmp_batch[k], np.ndarray):
+                    tmp_batch[k] = torch.from_numpy(tmp_batch[k]).to(device)
+                else:
+                    tmp_batch[k] = tmp_batch[k].to(device)
 
         yield {k: v for k, v in tmp_batch.items()}

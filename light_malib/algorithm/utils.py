@@ -15,6 +15,57 @@
 from torch import nn
 import torch
 import numpy as np
+import wrapt
+import tree
+from light_malib.utils.episode import EpisodeKey
+
+
+def hard_update(target, source):
+    """Copy network parameters from source to target.
+
+    Reference:
+        https://github.com/ikostrikov/pytorch-ddpg-naf/blob/master/ddpg.py#L15
+
+    :param torch.nn.Module target: Net to copy parameters to.
+    :param torch.nn.Module source: Net whose parameters to copy
+    """
+
+    for target_param, param in zip(target.parameters(), source.parameters()):
+        target_param.data.copy_(param.data)
+
+
+@wrapt.decorator
+def shape_adjusting(wrapped, instance, args, kwargs):
+    """
+    A wrapper that adjust the inputs to corrent shape.
+    e.g.
+        given inputs with shape (n_rollout_threads, n_agent, ...)
+        reshape it to (n_rollout_threads * n_agent, ...)
+    """
+    offset = len(instance.observation_space.shape)
+    original_shape_pre = kwargs[EpisodeKey.CUR_OBS].shape[:-offset]
+    num_shape_ahead = len(original_shape_pre)
+
+    def adjust_fn(x):
+        if isinstance(x, (np.ndarray, torch.Tensor)):
+            return x.reshape((-1,) + x.shape[num_shape_ahead:])
+        else:
+            return x
+
+    def recover_fn(x):
+        if isinstance(x, (np.ndarray, torch.Tensor)):
+            return x.reshape(original_shape_pre + x.shape[1:])
+        else:
+            return x
+
+    adjusted_args = tree.map_structure(adjust_fn, args)
+    adjusted_kwargs = tree.map_structure(adjust_fn, kwargs)
+
+    rets = wrapped(*adjusted_args, **adjusted_kwargs)
+
+    recover_rets = tree.map_structure(recover_fn, rets)
+
+    return recover_rets
 
 
 def init_fc_weights(m, init_method, gain=1.0):

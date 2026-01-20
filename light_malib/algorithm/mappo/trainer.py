@@ -54,15 +54,16 @@ class MAPPOTrainer(Trainer):
         ), "TODO(jh): kl early stop is not supported is current distributed implmentation."
 
         # move data to gpu
-        global_timer.record("move_to_gpu_start")
-        for key, value in batch.items():
-            if isinstance(value, np.ndarray):
-                value = torch.FloatTensor(value)
-            batch[key] = value.to(policy.device)
+        # move data to gpu
+        # global_timer.record("move_to_gpu_start")
+        # for key, value in batch.items():
+        #     if isinstance(value, np.ndarray):
+        #         value = torch.FloatTensor(value)
+        #     batch[key] = value.to(policy.device)
         
         if EpisodeKey.CUR_STATE not in batch:
             batch[EpisodeKey.CUR_STATE]=batch[EpisodeKey.CUR_OBS]
-        global_timer.time("move_to_gpu_start", "move_to_gpu_end", "move_to_gpu")
+        # global_timer.time("move_to_gpu_start", "move_to_gpu_end", "move_to_gpu")
 
         kl_diff = 0
         for i_epoch in range(ppo_epoch):

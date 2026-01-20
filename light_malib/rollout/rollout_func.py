@@ -177,6 +177,7 @@ def submit_batches(data_server,episode, rollout_desc,credit_reassign_cfg=None,as
             EpisodeKey.ACTION: episode[step][EpisodeKey.ACTION],  # [np.newaxis, ...],
             EpisodeKey.REWARD: episode[step][EpisodeKey.REWARD],  # [np.newaxis, ...],
             EpisodeKey.DONE: episode[step][EpisodeKey.DONE],  # [np.newaxis, ...],
+            EpisodeKey.ACTIVE_MASK: episode[step][EpisodeKey.ACTIVE_MASK],
             EpisodeKey.NEXT_OBS: episode[step + 1][EpisodeKey.CUR_OBS],  # [np.newaxis, ...],
             EpisodeKey.NEXT_ACTION_MASK: episode[step + 1][EpisodeKey.ACTION_MASK],  # [np.newaxis, ...]
             EpisodeKey.CRITIC_RNN_STATE: episode[step][EpisodeKey.CRITIC_RNN_STATE],
@@ -285,7 +286,7 @@ def rollout_func(
 
         # record data after env step
         step_data = update_fields(
-            step_data, select_fields(env_rets, [EpisodeKey.REWARD, EpisodeKey.DONE])
+            step_data, select_fields(env_rets, [EpisodeKey.REWARD, EpisodeKey.DONE, EpisodeKey.ACTIVE_MASK])
         )
         step_data = update_fields(
             step_data,

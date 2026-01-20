@@ -26,14 +26,14 @@
 
 # CHECK
 1. [x] check the sync-training performance, especially the evaluation performance.
-2. [ ] do we support mini-batch now? => we need to move move_to_gpu (also, return computation) inside mini-batch iteration.
-3. [ ] the implementation of RNN data generator.
+2. [x] do we support mini-batch now? => we need to move move_to_gpu (also, return computation) inside mini-batch iteration.
+3. [x] the implementation of RNN data generator.
 
 # REFACTOR
 1. [x] remove modified mappo codes. 
 2. [ ] make a model a class rathe than a module. merge similar models. maybe use registry?
-3. [ ] mappo's loss codes.
+3. [x] mappo's loss codes.
 4. [ ] maybe we should add a dedicated scheduler and runner for cooperative tasks.
 5. [x] maybe reshape in return_compute is unnecessary
-6. [ ] use consistent names. for example, "share_obs"="states"!
-7. [ ] refactor the implementation of popart(value normalization).
+6. [x] use consistent names. for example, "share_obs"="states"!
+7. [x] refactor the implementation of popart(value normalization).

@@ -184,7 +184,7 @@ class MAPPOLoss(LossFunc):
             assert len(agent_ids.shape)==1
         
         (
-            share_obs_batch,
+            states_batch,
             obs_batch,
             actions_batch,
             value_preds_batch,
@@ -216,7 +216,7 @@ class MAPPOLoss(LossFunc):
         if update_actor:
             ret = self._policy.compute_action(
                 **{
-                    EpisodeKey.CUR_STATE: share_obs_batch,
+                    EpisodeKey.CUR_STATE: states_batch,
                     EpisodeKey.CUR_OBS: obs_batch,
                     EpisodeKey.ACTION: actions_batch,
                     EpisodeKey.ACTOR_RNN_STATE: actor_rnn_states_batch,
@@ -316,7 +316,7 @@ class MAPPOLoss(LossFunc):
         else:
             ret = self._policy.value_function(
                 **{
-                    EpisodeKey.CUR_STATE: share_obs_batch,
+                    EpisodeKey.CUR_STATE: states_batch,
                     EpisodeKey.CUR_OBS: obs_batch,
                     EpisodeKey.CRITIC_RNN_STATE: critic_rnn_states_batch,
                     EpisodeKey.DONE: dones_batch

@@ -147,6 +147,7 @@ class GRFootballEnv(BaseEnv):
                 EpisodeKey.NEXT_OBS: encoded_observations[agent_id],
                 EpisodeKey.ACTION_MASK: action_masks[agent_id],
                 EpisodeKey.DONE: dones[agent_id],
+                EpisodeKey.ACTIVE_MASK: np.ones((self.num_players[agent_id], 1), dtype=bool),
                 EpisodeKey.GLOBAL_STATE: team_state[agent_id][np.newaxis,...]
             }
             for agent_id in self.agent_ids
@@ -215,6 +216,7 @@ class GRFootballEnv(BaseEnv):
                 EpisodeKey.ACTION_MASK: action_masks[agent_id],
                 EpisodeKey.REWARD: rewards[agent_id],
                 EpisodeKey.DONE: dones[agent_id],
+                EpisodeKey.ACTIVE_MASK: np.ones((self.num_players[agent_id], 1), dtype=bool),
                 EpisodeKey.GLOBAL_STATE: team_state[agent_id][np.newaxis,...]
             }
             for agent_id in self.agent_ids

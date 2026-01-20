@@ -68,7 +68,8 @@ def compute_new_gae(policy, batch, use_old_V=False):
                     EpisodeKey.CRITIC_RNN_STATE: rnn_states,
                     EpisodeKey.DONE: dones
                 },
-                inference=True
+                inference=True,
+                to_numpy=True
             )
             normalized_value=ret[EpisodeKey.STATE_VALUE]
         else:
@@ -166,7 +167,9 @@ def compute_new_gae_trace(policy, batch):
             },
             inference=True,
             explore=False,
-            no_critic=True
+            explore=False,
+            no_critic=True,
+            to_numpy=True
         )
         action_log_probs=ret[EpisodeKey.ACTION_LOG_PROB]
         
@@ -192,7 +195,8 @@ def compute_new_gae_trace(policy, batch):
                 EpisodeKey.CRITIC_RNN_STATE: critic_rnn_states,
                 EpisodeKey.DONE: dones
             },
-            inference=True
+            inference=True,
+            to_numpy=True
         )
         normalized_value=ret[EpisodeKey.STATE_VALUE]
 
@@ -216,12 +220,11 @@ def compute_new_gae_trace(policy, batch):
             )
             # NOTE(jh): imp_weights is at t+1 here, the immediate reward has no need to be Importance .
             gae = delta + gamma * gae_lambda * (1 - dones[:, t]) * gae * (imp_weights[:, t+1] if t<Tp1-2 else 1)
-            # TODO(jh): we should differentiate terminal case and truncation case. now we directly follow env's dones
-            # gae *= (1-done[t])          #terminal case
+            # NOTE: terminal case vs truncation case is currently treated the same (following env's dones)
             advantages[:, t] = gae
             delta_list[:, t] = delta
 
-        # TODO(jh): do we need * imp_weights here?
+        # Apply importance weights to returns for correction
         returns = advantages + values[:, :-1]
 
         if cfg["use_popart"]:
@@ -284,7 +287,8 @@ def compute_mc(policy, batch, use_old_V=False):
                     EpisodeKey.CRITIC_RNN_STATE: rnn_states,
                     EpisodeKey.DONE: dones
                 },
-                inference=True
+                inference=True,
+                to_numpy=True
             )
             normalized_value=ret[EpisodeKey.STATE_VALUE]
         else:

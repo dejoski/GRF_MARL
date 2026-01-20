@@ -14,6 +14,239 @@ from light_malib.utils.episode import EpisodeKey
 import wrapt
 import tree
 import importlib
+from gym.spaces import Discrete
+from ..utils import PopArt, shape_adjusting
+from light_malib.registry import registry
+from copy import deepcopy
+from light_malib.algorithm.common.policy import Policy
+
+
+@registry.registered(registry.POLICY)
+class DQN(Policy):
+    def __init__(
+            self,
+            registered_name: str,
+            observation_space: gym.spaces.Space,
+            action_space: gym.spaces.Space,
+            model_config: Dict[str, Any] = None,
+            custom_config: Dict[str, Any] = None,
+            **kwargs,
+    ):
+        super(DQN, self).__init__(
+            registered_name=registered_name,
+            observation_space=observation_space,
+            action_space=action_space,
+            model_config=model_config,
+            custom_config=custom_config,
+        )
+
+        model_type = self.model_config["model"]
+        Logger.warning("use model type: {}".format(model_type))
+        model = importlib.import_module("light_malib.model.{}".format(model_type))
+
+        self.encoder = model.FeatureEncoder()
+
+        # TODO(jh): extension to multi-agent cooperative case
+        # self.env_agent_id = kwargs["env_agent_id"]
+        # self.global_observation_space=self.encoder.global_observation_space if hasattr(self.encoder,"global_observation_space") else self.encoder.observation_space
+        self.observation_space = self.encoder.observation_space
+        self.action_space = action_space
+        # assert isinstance(self.action_space, Discrete), str(self.action_space)
+
+        self.device = torch.device(
+            "cuda" if self.custom_config.get("use_cuda", False) else "cpu"
+        )
+
+        self.actor = model.Actor(
+            self.model_config["actor"],
+            self.observation_space,
+            self.action_space,
+            self.custom_config,
+            self.model_config["initialization"],
+        )
+
+        self.critic = model.Critic(
+            self.model_config["critic"],
+            self.observation_space,
+            self.action_space,
+            self.custom_config,
+            self.model_config["initialization"],
+        )
+
+        self.target_critic = deepcopy(self.critic)
+
+        # if custom_config["use_popart"]:
+        #     self.value_normalizer = PopArt(
+        #         1, device=self.device, beta=custom_config["popart_beta"]
+        #     )
+
+    @property
+    def feature_encoder(self):  # legacy
+        return self.encoder
+
+    def get_initial_state(self, batch_size):
+        if hasattr(self.critic, "get_initial_state"):
+            return {
+                EpisodeKey.CRITIC_RNN_STATE: self.critic.get_initial_state(batch_size)
+            }
+        else:
+            return {}
+
+    def to_device(self, device):
+        self_copy = copy.deepcopy(self)
+        self_copy.to(device) # Policy inherits from nn.Module? No, wait. Policy header: class Policy(metaclass=ABCMeta). 
+        # But MAPPO/DQN actually seem to be treated as nn.Modules in some contexts? 
+        # Wait, Policy doesn't inherit from nn.Module in common/policy.py.
+        # But usually policies are nn.Modules. 
+        # Checked common/policy.py: `class Policy(metaclass=ABCMeta):`. 
+        # But `DQN` original inherited from `nn.Module`.
+        # However, `MAPPO` inherits from `Policy`.
+        # Let's check if `Policy` methods like `to` exist.
+        # `Policy` has `to_device` abstract method. 
+        # So I should implement `to_device`.
+        
+        self_copy.device = device
+        self_copy.actor = self_copy.actor.to(device)
+        self_copy.critic = self_copy.critic.to(device)
+        self_copy.target_critic = self_copy.target_critic.to(device)
+        return self_copy
+    
+    # We need to implement train/eval methods as they are abstract in Policy
+    def train(self):
+        self.actor.train()
+        self.critic.train()
+        self.target_critic.train()
+
+    def eval(self):
+        self.actor.eval()
+        self.critic.eval()
+        self.target_critic.eval()
+
+    @shape_adjusting
+    def compute_action(self, **kwargs):
+        '''
+        TODO(jh): need action sampler, e.g. epsilon-greedy.
+        '''
+        step = kwargs.get("step", 0)
+        to_numpy = kwargs.get("to_numpy", True)
+        explore = kwargs.get("explore", True) # Default to True if not provided
+        
+        # Ensure input tensors are on the correct device
+        for k, v in kwargs.items():
+            if isinstance(v, np.ndarray):
+                v = torch.tensor(v, device=self.device, requires_grad=False)
+                kwargs[k] = v
+
+        with torch.no_grad():
+            obs = kwargs[EpisodeKey.CUR_OBS]
+            action_masks = kwargs.get(EpisodeKey.ACTION_MASK)
+            
+            # Critic forward pass
+            q_values = self.critic(**{EpisodeKey.CUR_OBS: obs, EpisodeKey.ACTION_MASK: action_masks})
+            
+            # denormalize
+            # if hasattr(self,"value_normalizer"):
+            #     q_values=self.value_normalizer.denormalize(q_values)
+            
+            if not explore:
+                explore_cfg = {"mode": "greedy"}
+            else:
+                _explore_cfg = self.custom_config.get("explore_cfg", {"mode": "epsilon_greedy", "max_epsilon": 1.0, "min_epsilon": 0.01, "total_decay_steps": 100000}) # Add default
+                assert _explore_cfg["mode"] == "epsilon_greedy", "only epsilon_greedy is supported now."
+                if "epsilon" not in _explore_cfg:
+                    # only support linear decaying now
+                    max_epsilon = _explore_cfg["max_epsilon"]
+                    min_epsilon = _explore_cfg["min_epsilon"]
+                    total_decay_steps = _explore_cfg["total_decay_steps"]
+                    if total_decay_steps > 0:
+                        epsilon = (max_epsilon - min_epsilon) / total_decay_steps * (
+                                    total_decay_steps - step + 1) + min_epsilon
+                    else:
+                        epsilon = min_epsilon
+                    epsilon = max(min_epsilon, min(max_epsilon, epsilon)) # Clamp
+                    explore_cfg = {"mode": "epsilon_greedy", "epsilon": epsilon}
+                else:
+                    # Explicit epsilon provided
+                    explore_cfg = copy.deepcopy(_explore_cfg)
+            
+            actions, action_probs = self.actor(
+                **{EpisodeKey.STATE_ACTION_VALUE: q_values, EpisodeKey.ACTION_MASK: action_masks},
+                explore_cfg=explore_cfg)
+            
+            if to_numpy:
+                actions = actions.cpu().numpy()
+                action_probs = action_probs.cpu().numpy()
+        return {EpisodeKey.ACTION: actions, EpisodeKey.ACTION_PROBS: action_probs, EpisodeKey.ACTION_LOG_PROB: action_probs} # Added action_log_prob for consistency if needed, though probs aren't log probs here.
+
+    @shape_adjusting
+    def value_function(self, **kwargs):
+        to_numpy = kwargs.get("to_numpy", True)
+        use_target_critic = kwargs.get("use_target_critic", False)
+        
+        # Ensure input-tensors are on the correct device
+        for k, v in kwargs.items():
+            if isinstance(v, np.ndarray):
+                v = torch.tensor(v, device=self.device, requires_grad=False)
+                kwargs[k] = v
+
+        if use_target_critic:
+            critic = self.target_critic
+        else:
+            critic = self.critic
+            
+        with torch.no_grad():
+            obs = kwargs[EpisodeKey.CUR_OBS]
+            action_masks = kwargs.get(EpisodeKey.ACTION_MASK)
+            q_values = critic(**{EpisodeKey.CUR_OBS: obs, EpisodeKey.ACTION_MASK: action_masks})
+            # denormalize
+            # if hasattr(self,"value_normalizer"):
+            #     q_values=self.value_normalizer.denormalize(q_values)
+            if to_numpy:
+                q_values = q_values.cpu().numpy()
+        return {EpisodeKey.STATE_ACTION_VALUE: q_values,
+                EpisodeKey.ACTION_MASK: action_masks}
+
+    def dump(self, dump_dir):
+        os.makedirs(dump_dir, exist_ok=True)
+        torch.save(self.critic.state_dict(), os.path.join(dump_dir, "critic_state_dict.pt"))
+        if hasattr(self, "description"):
+             pickle.dump(self.description, open(os.path.join(dump_dir, "desc.pkl"), "wb"))
+
+    @staticmethod
+    def load(dump_dir, **kwargs):
+        with open(os.path.join(dump_dir, "desc.pkl"), "rb") as f:
+            desc_pkl = pickle.load(f)
+
+        policy = DQN(
+            registered_name=desc_pkl["registered_name"],
+            observation_space=desc_pkl["observation_space"],
+            action_space=desc_pkl["action_space"],
+            model_config=desc_pkl["model_config"],
+            custom_config=desc_pkl["custom_config"],
+            **kwargs,
+        )
+
+        critic_path = os.path.join(dump_dir, "critic_state_dict.pt")
+        if os.path.exists(critic_path):
+            critic_state_dict = torch.load(os.path.join(dump_dir, "critic_state_dict.pt"), map_location=policy.device)
+            policy.critic.load_state_dict(critic_state_dict)
+            policy.target_critic = deepcopy(policy.critic)
+        return policy
+import os
+import pickle
+import random
+import gym
+import torch
+import numpy as np
+
+from torch import nn
+from light_malib.utils.logger import Logger
+from light_malib.utils.typing import DataTransferType, Tuple, Any, Dict, EpisodeID, List
+from light_malib.utils.episode import EpisodeKey
+
+import wrapt
+import tree
+import importlib
 from light_malib.utils.logger import Logger
 from gym.spaces import Discrete
 from ..utils import PopArt
